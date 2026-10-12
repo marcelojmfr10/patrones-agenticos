@@ -249,8 +249,24 @@ async function withOrchestrator() {
 
   console.log(` ☎️ Llamada: ${COMPOUND_CALL}`.blue);
 
-  // TODO: implementar orquestador con los workers
-  const text = "XXX";
+  const { text } = await generateText({
+    model,
+    instructions:
+      "Eres el supervisor de la centralita de DevTalles. No atiendes al " +
+      "cliente directamente: delega cada parte de la llamada al departamento " +
+      "correspondiente con tus herramientas. Puedes delegar a varios. " +
+      "Cuando todo esté resuelto, redacta UNA sola respuesta al cliente " +
+      "integrando los resultados y conservando los identificadores exactos " +
+      "(facturas, tickets, catálogos). Responde en español, máximo 120 palabras.",
+    prompt: COMPOUND_CALL,
+    tools: {
+      delegateToVentas: delegateTo("ventas", tracer),
+      delegateToSoporte: delegateTo("soporte", tracer),
+      delegateToFacturacion: delegateTo("facturacion", tracer),
+    },
+    stopWhen: stepCountIs(8),
+    onStepEnd: tracer.onStepFinish,
+  });
 
   console.log("\n Respuesta final al cliente:".blue);
   console.log(`     ${text.trim()}`.green);
@@ -266,13 +282,13 @@ async function withOrchestrator() {
 // ---------------------------------------------------------------------------
 
 export async function orchestratorWorkersMain() {
-  const a = await withRouter();
-  // const b = await withOrchestrator();
+  // const a = await withRouter();
+  const b = await withOrchestrator();
 
   console.log("\n═══ COMPARATIVA ═══\n".blue);
   console.table({
-    Router: a,
-    // Orquestador: b,
+    // Router: a,
+    Orquestador: b,
   });
 
   console.log(
