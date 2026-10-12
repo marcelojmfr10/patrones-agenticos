@@ -24,7 +24,7 @@
  */
 
 import { generateText, tool, stepCountIs, Output, isStepCount } from "ai";
-import { z } from "zod";
+import { promise, z } from "zod";
 
 import { createTracer, model } from "../../helpers/index.js";
 
@@ -134,11 +134,38 @@ async function singleAgent() {
  *   - `assignment` es el encargo completo para el worker. Debe ser
  *     autocontenido: el worker no ve la petición original ni a los demás.
  */
-// TODO: Implementar planSchema
+const planSchema = z.object({
+  tasks: z
+    .array(
+      z.object({
+        topic: z.string().describe("Nombre corto, ej: 'PlayStation'"),
+        assignment: z
+          .string()
+          .describe(
+            "Encargo completo y autocontenido para un investigador que no conoce la petición original",
+          ),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .describe("Investigaciones independientes entre sí"),
+});
 
 async function planResearch(tracer: ReturnType<typeof createTracer>) {
-  // TODO: Implementar un plan (output) para seguirlo
-  // return output.tasks;
+  const { output } = await generateText({
+    model,
+    instructions:
+      "Eres un planificador. No investigues. " +
+      "Divide la petición en investigaciones independientes que puedan hacerse a la vez, " +
+      "una por tema. No incluyas temas que no se mencionan y responde en español.",
+    prompt: RESEARCH_REQUEST,
+    output: Output.object({
+      schema: planSchema,
+    }),
+    onStepEnd: tracer.onStepFinish,
+  });
+
+  return output.tasks;
 }
 
 // ----- Fase 2: el worker ---------------------------------------------------
@@ -151,14 +178,20 @@ async function runWorker(
   assignment: string,
   tracer: ReturnType<typeof createTracer>,
 ) {
-  // TODO: Implementar runWorker
-  /**
-   * 'Eres un investigador de videojuegos. Cumple tu encargo consultando ' +
-    'la herramienta y responde con una lista breve: título, fecha y una ' +
-    'frase de por qué importa. Copia títulos y fechas literalmente. ' +
-    'Responde en español.',
-   */
-  // return text;
+  const { text } = await generateText({
+    model,
+    tools: { searchUpcomingGames },
+    stopWhen: isStepCount(4),
+    instructions:
+      "Eres un investigador de videojuegos. Cumple tu encargo consultando " +
+      "la herramienta y responde con una lista breve: título, fecha y una " +
+      "frase de por qué importa. Copia títulos y fechas literalmente. " +
+      "Responde en español.",
+    prompt: assignment,
+    onStepEnd: tracer.onStepFinish,
+  });
+
+  return text;
 }
 
 // ----- Fase 3: la integración ----------------------------------------------
@@ -167,14 +200,24 @@ async function integrateFindings(
   findings: { topic: string; findings: string }[],
   tracer: ReturnType<typeof createTracer>,
 ) {
-  /**
-   * 'Eres editor de una newsletter de videojuegos. Integra los hallazgos ' +
-      'en un repaso de máximo 200 palabras. Si un juego aparece en varios ' +
-      'temas, menciónalo UNA sola vez indicando todas sus plataformas. ' +
-      'Responde en español.',
-   */
-  // TODO: Implementar integrateFindings
-  // return text;
+  const { text } = await generateText({
+    model,
+    instructions:
+      "Eres editor de una newsletter de videojuegos. Integra los hallazgos " +
+      "en un repaso de máximo 200 palabras. Si un juego aparece en varios " +
+      "temas, menciónalo UNA sola vez indicando todas sus plataformas. " +
+      "Responde en español.",
+    prompt:
+      `Petición original: ${RESEARCH_REQUEST} \n\n` +
+      `Hallazgos por tema: \n` +
+      JSON.stringify(findings),
+    //   findings
+    //     .map((item) => `--- ${item.topic} --- \n ${item.findings}`)
+    //     .join("\n\n"),
+    onStepEnd: tracer.onStepFinish,
+  });
+
+  return text;
 }
 
 // ----- Las tres fases juntas -----------------------------------------------
@@ -186,31 +229,39 @@ async function planExecuteIntegrate() {
   const startedAt = Date.now();
 
   // 1. Planificar
-  // TODO: obtener las tareas
+  const tasks = await planResearch(tracer);
 
-  // console.log(` Plan: ${tasks.length} investigaciones`.blue);
-  // for (const task of tasks) {
-  //   console.log(`   · ${task.topic.yellow}: ${task.assignment}`);
-  // }
+  console.log(` Plan: ${tasks.length} investigaciones`.blue);
+  for (const task of tasks) {
+    console.log(`   · ${task.topic.yellow}: ${task.assignment}`);
+  }
 
   // 2. Ejecutar en paralelo — aquí es donde se gana la latencia
   const workersStartedAt = Date.now();
 
-  // TODO: ejecutar las tareas en paralelo
+  const findings = await Promise.all(
+    tasks.map(async (task) => {
+      console.log(`\n ---> worker [${task.topic.yellow}] arranca`);
+      const result = await runWorker(task.assignment, tracer);
+      console.log(`\n <--- worker [${task.topic.yellow}] termina`);
+
+      return { topic: task.topic, findings: result };
+    }),
+  );
 
   const workersMs = Date.now() - workersStartedAt;
 
   // 3. Integrar
-  // TODO: integrar los hallazgos
+  const report = await integrateFindings(findings, tracer);
 
   console.log("\n Informe integrado:\n".blue);
-  // console.log(report.green);
+  console.log(report.green);
 
   return {
     ...tracer.summary(),
     ms: Date.now() - startedAt,
     workersMs,
-    // workers: tasks.length,
+    workers: tasks.length,
   };
 }
 
@@ -227,11 +278,11 @@ export async function parallelizationMain() {
   }
 
   const a = await singleAgent();
-  // const b = await planExecuteIntegrate();
+  const b = await planExecuteIntegrate();
 
   console.log("\n═══ COMPARATIVA ═══\n".blue);
   console.table({
     "A) Agente único": a,
-    // 'B) Plan + paralelo + integración': b,
+    "B) Plan + paralelo + integración": b,
   });
 }
