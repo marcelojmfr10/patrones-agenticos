@@ -224,8 +224,23 @@ function delegateTo(
   department: Department,
   tracer: ReturnType<typeof createTracer>,
 ) {
-  // TODO: implementar la delegación
-  return "";
+  const config = DEPARTMENTS[department];
+
+  return tool({
+    description: `Delega una tarea al departamento de ${department}: ${config.description}`,
+    inputSchema: z.object({
+      task: z
+        .string()
+        .describe("Instrucción concreta para el departamento, en una frase"),
+    }),
+    execute: async ({ task }) => {
+      console.log(`\n ---> Orchestrator delega a ${department}: ${task}`.blue);
+      const result = await runWorker(department, task, tracer);
+      console.log(`${department}: ${result}`.green);
+
+      return { department, result };
+    },
+  });
 }
 
 async function withOrchestrator() {
