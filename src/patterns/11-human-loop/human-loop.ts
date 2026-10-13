@@ -312,6 +312,35 @@ export async function humanInTheLoopMain() {
     }
 
     // Implementar el contador de gates y también el HITL
+    gates++;
+    console.log(`\n --- Gate ${gates} --- `.blue);
+
+    const approvals: ToolApprovalResponse[] = [];
+
+    for (const request of requests) {
+      if (request.type !== "tool-approval-request") continue;
+
+      const { toolCallId, input } = request.toolCall;
+      const verdict = await review(
+        input as { purchaseId: string; reason: string },
+      );
+
+      if (verdict.approved) {
+        APPROVALS.set(toolCallId, verdict.by);
+      }
+
+      approvals.push({
+        type: "tool-approval-response",
+        approvalId: request.approvalId,
+        approved: verdict.approved,
+        reason: verdict.note,
+      });
+    }
+
+    messages.push({
+      role: "tool",
+      content: approvals,
+    });
   }
 
   // -----------------------------------------------------------------------------------
